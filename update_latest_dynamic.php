@@ -15,6 +15,10 @@ if (PHP_SAPI !== 'cli') {
 // 可在这里配置 Account / Task 保存“最新动态”内容的字段名。
 $accountLastUpdateField = 'last_update';
 $taskLastUpdateField = 'last_update';
+// 是否强制更新全部（忽略“5分钟内才更新”的限制）。
+$forceUpdateAll = false;
+// 仅当记录最后修改时间在这个分钟数以内时才更新（force=true 时忽略）。
+$updateWithinMinutes = 5;
 
 if (!preg_match('/^[a-zA-Z0-9_]+$/', $accountLastUpdateField) || !preg_match('/^[a-zA-Z0-9_]+$/', $taskLastUpdateField)) {
     fwrite(STDERR, "Invalid field name.\n");
@@ -85,6 +89,8 @@ $updateTaskStmt = $pdo->prepare("UPDATE task SET {$taskLastUpdateField} = :value
 $scanned = 0;
 $updatedAccountCount = 0;
 $updatedTaskCount = 0;
+$skippedByTimeCount = 0;
+$freshThreshold = time() - ($updateWithinMinutes * 60);
 
 foreach ($accountIds as $accountId) {
     $scanned++;
@@ -104,22 +110,30 @@ foreach ($accountIds as $accountId) {
     }
 
     $latestPostContent = null;
+    $latestPostTime = null;
 
     if ($accountPost && $taskPost) {
         $accountTime = strtotime((string) $accountPost['updated_at']);
         $taskTime = strtotime((string) $taskPost['updated_at']);
         if ($accountTime >= $taskTime) {
             $latestPostContent = $accountPost['post'];
+            $latestPostTime = $accountTime;
         } else {
             $latestPostContent = sprintf('[%s]%s', $latestTaskName, (string) $taskPost['post']);
+            $latestPostTime = $taskTime;
         }
     } elseif ($accountPost) {
         $latestPostContent = $accountPost['post'];
+        $latestPostTime = strtotime((string) $accountPost['updated_at']);
     } elseif ($taskPost) {
         $latestPostContent = sprintf('[%s]%s', $latestTaskName, (string) $taskPost['post']);
+        $latestPostTime = strtotime((string) $taskPost['updated_at']);
     }
 
-    if ($latestPostContent !== null) {
+    if (
+        $latestPostContent !== null &&
+        ($forceUpdateAll || ($latestPostTime !== null && $latestPostTime >= $freshThreshold))
+    ) {
         $updateAccountStmt->execute([
             ':value' => $latestPostContent,
             ':id' => $accountId,
@@ -128,9 +142,18 @@ foreach ($accountIds as $accountId) {
         if ($updateAccountStmt->rowCount() > 0) {
             $updatedAccountCount++;
         }
+    } elseif ($latestPostContent !== null) {
+        $skippedByTimeCount++;
     }
 
-    if ($latestTaskId && $taskPost && $taskPost['post'] !== null) {
+    $taskPostTime = $taskPost ? strtotime((string) $taskPost['updated_at']) : null;
+
+    if (
+        $latestTaskId &&
+        $taskPost &&
+        $taskPost['post'] !== null &&
+        ($forceUpdateAll || ($taskPostTime !== null && $taskPostTime >= $freshThreshold))
+    ) {
         $updateTaskStmt->execute([
             ':value' => $taskPost['post'],
             ':id' => $latestTaskId,
@@ -139,12 +162,16 @@ foreach ($accountIds as $accountId) {
         if ($updateTaskStmt->rowCount() > 0) {
             $updatedTaskCount++;
         }
+    } elseif ($latestTaskId && $taskPost && $taskPost['post'] !== null) {
+        $skippedByTimeCount++;
     }
 }
 
 printf(
-    "Done. scanned=%d updated_accounts=%d updated_tasks=%d\n",
+    "Done. scanned=%d updated_accounts=%d updated_tasks=%d skipped_by_time=%d force_update_all=%s\n",
     $scanned,
     $updatedAccountCount,
-    $updatedTaskCount
+    $updatedTaskCount,
+    $skippedByTimeCount,
+    $forceUpdateAll ? 'true' : 'false'
 );
