@@ -19,8 +19,8 @@ $taskLastUpdateField = 'last_update';
 $forceUpdateAll = false;
 // 仅当记录最后修改时间在这个分钟数以内时才更新（force=true 时忽略）。
 $updateWithinMinutes = 5;
-// 用于和数据库时间保持一致的时区（默认香港）。
-$appTimeZone = 'Asia/Hong_Kong';
+// 数据库时间为 UTC，这里统一使用 UTC+0。
+$appTimeZone = 'UTC';
 
 date_default_timezone_set($appTimeZone);
 $timeZone = new DateTimeZone($appTimeZone);
