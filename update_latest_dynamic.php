@@ -48,7 +48,7 @@ try {
 $accountIds = $pdo->query('SELECT id FROM account WHERE deleted = 0')->fetchAll(PDO::FETCH_COLUMN);
 
 $getLatestTaskStmt = $pdo->prepare(
-    "SELECT id
+    "SELECT id, name
     FROM task
     WHERE deleted = 0
       AND parent_type = 'Account'
@@ -90,7 +90,9 @@ foreach ($accountIds as $accountId) {
     $scanned++;
 
     $getLatestTaskStmt->execute([':accountId' => $accountId]);
-    $latestTaskId = $getLatestTaskStmt->fetchColumn() ?: null;
+    $latestTask = $getLatestTaskStmt->fetch() ?: null;
+    $latestTaskId = $latestTask['id'] ?? null;
+    $latestTaskName = $latestTask['name'] ?? '';
 
     $getLatestAccountPostStmt->execute([':accountId' => $accountId]);
     $accountPost = $getLatestAccountPostStmt->fetch() ?: null;
@@ -106,11 +108,15 @@ foreach ($accountIds as $accountId) {
     if ($accountPost && $taskPost) {
         $accountTime = strtotime((string) $accountPost['updated_at']);
         $taskTime = strtotime((string) $taskPost['updated_at']);
-        $latestPostContent = $accountTime >= $taskTime ? $accountPost['post'] : $taskPost['post'];
+        if ($accountTime >= $taskTime) {
+            $latestPostContent = $accountPost['post'];
+        } else {
+            $latestPostContent = sprintf('[%s]%s', $latestTaskName, (string) $taskPost['post']);
+        }
     } elseif ($accountPost) {
         $latestPostContent = $accountPost['post'];
     } elseif ($taskPost) {
-        $latestPostContent = $taskPost['post'];
+        $latestPostContent = sprintf('[%s]%s', $latestTaskName, (string) $taskPost['post']);
     }
 
     if ($latestPostContent !== null) {
