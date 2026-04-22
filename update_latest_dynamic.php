@@ -3,20 +3,23 @@
 declare(strict_types=1);
 
 /**
- * Update account/task latest post snapshot into last_update fields.
- *
- * Run example:
- *   DB_HOST=127.0.0.1 DB_PORT=3306 DB_NAME=espocrm DB_USER=espocrm DB_PASS=secret \
- *   php update_latest_dynamic.php
+ * 使用说明：
+ * DB_HOST=127.0.0.1 DB_PORT=3306 DB_NAME=espocrm DB_USER=espocrm DB_PASS=secret php update_latest_dynamic.php
  */
 
 if (PHP_SAPI !== 'cli') {
-    fwrite(STDERR, "This script must be run from CLI.\n");
+    fwrite(STDERR, "This script must be run in CLI.\n");
     exit(1);
 }
 
-$timezone = getenv('TZ') ?: 'UTC';
-date_default_timezone_set($timezone);
+// 可在这里配置 Account / Task 保存“最新动态”内容的字段名。
+$accountLastUpdateField = 'last_update';
+$taskLastUpdateField = 'last_update';
+
+if (!preg_match('/^[a-zA-Z0-9_]+$/', $accountLastUpdateField) || !preg_match('/^[a-zA-Z0-9_]+$/', $taskLastUpdateField)) {
+    fwrite(STDERR, "Invalid field name.\n");
+    exit(1);
+}
 
 $host = getenv('DB_HOST') ?: '127.0.0.1';
 $port = getenv('DB_PORT') ?: '3306';
@@ -26,7 +29,7 @@ $pass = getenv('DB_PASS') ?: '';
 $charset = getenv('DB_CHARSET') ?: 'utf8mb4';
 
 if ($dbName === '' || $user === '') {
-    fwrite(STDERR, "Missing DB_NAME or DB_USER environment variable.\n");
+    fwrite(STDERR, "Please provide DB_NAME and DB_USER.\n");
     exit(1);
 }
 
@@ -36,41 +39,15 @@ try {
     $pdo = new PDO($dsn, $user, $pass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
     ]);
 } catch (PDOException $e) {
     fwrite(STDERR, 'DB connection failed: ' . $e->getMessage() . "\n");
     exit(1);
 }
 
-$requiredColumns = [
-    'account' => ['id', 'deleted', 'last_update'],
-    'task' => ['id', 'deleted', 'parent_id', 'parent_type', 'last_update', 'created_at', 'modified_at'],
-    'note' => ['id', 'deleted', 'parent_id', 'parent_type', 'type', 'post', 'created_at', 'modified_at'],
-];
+$accountIds = $pdo->query('SELECT id FROM account WHERE deleted = 0')->fetchAll(PDO::FETCH_COLUMN);
 
-$columnCheckStmt = $pdo->prepare(
-    'SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = :schema AND table_name = :tableName AND column_name = :columnName'
-);
-
-foreach ($requiredColumns as $tableName => $columns) {
-    foreach ($columns as $columnName) {
-        $columnCheckStmt->execute([
-            ':schema' => $dbName,
-            ':tableName' => $tableName,
-            ':columnName' => $columnName,
-        ]);
-
-        if ((int) $columnCheckStmt->fetchColumn() === 0) {
-            fwrite(STDERR, sprintf("Missing required column `%s`.`%s`.\n", $tableName, $columnName));
-            exit(1);
-        }
-    }
-}
-
-$accountStmt = $pdo->query('SELECT id FROM account WHERE deleted = 0');
-
-$latestTaskStmt = $pdo->prepare(
+$getLatestTaskStmt = $pdo->prepare(
     "SELECT id
     FROM task
     WHERE deleted = 0
@@ -80,8 +57,8 @@ $latestTaskStmt = $pdo->prepare(
     LIMIT 1"
 );
 
-$latestAccountPostStmt = $pdo->prepare(
-    "SELECT id, post, COALESCE(modified_at, created_at) AS updated_at
+$getLatestAccountPostStmt = $pdo->prepare(
+    "SELECT post, COALESCE(modified_at, created_at) AS updated_at
     FROM note
     WHERE deleted = 0
       AND parent_type = 'Account'
@@ -91,8 +68,8 @@ $latestAccountPostStmt = $pdo->prepare(
     LIMIT 1"
 );
 
-$latestTaskPostStmt = $pdo->prepare(
-    "SELECT id, post, COALESCE(modified_at, created_at) AS updated_at
+$getLatestTaskPostStmt = $pdo->prepare(
+    "SELECT post, COALESCE(modified_at, created_at) AS updated_at
     FROM note
     WHERE deleted = 0
       AND parent_type = 'Task'
@@ -102,73 +79,66 @@ $latestTaskPostStmt = $pdo->prepare(
     LIMIT 1"
 );
 
-$updateAccountStmt = $pdo->prepare('UPDATE account SET last_update = :lastUpdate WHERE id = :accountId');
-$updateTaskStmt = $pdo->prepare('UPDATE task SET last_update = :lastUpdate WHERE id = :taskId');
+$updateAccountStmt = $pdo->prepare("UPDATE account SET {$accountLastUpdateField} = :value WHERE id = :id");
+$updateTaskStmt = $pdo->prepare("UPDATE task SET {$taskLastUpdateField} = :value WHERE id = :id");
 
-$totalAccounts = 0;
-$updatedAccounts = 0;
-$updatedTasks = 0;
+$scanned = 0;
+$updatedAccountCount = 0;
+$updatedTaskCount = 0;
 
-$pdo->beginTransaction();
+foreach ($accountIds as $accountId) {
+    $scanned++;
 
-try {
-    while ($account = $accountStmt->fetch()) {
-        $totalAccounts++;
-        $accountId = $account['id'];
+    $getLatestTaskStmt->execute([':accountId' => $accountId]);
+    $latestTaskId = $getLatestTaskStmt->fetchColumn() ?: null;
 
-        $latestTaskStmt->execute([':accountId' => $accountId]);
-        $taskId = $latestTaskStmt->fetchColumn() ?: null;
+    $getLatestAccountPostStmt->execute([':accountId' => $accountId]);
+    $accountPost = $getLatestAccountPostStmt->fetch() ?: null;
 
-        $latestAccountPostStmt->execute([':accountId' => $accountId]);
-        $accountPost = $latestAccountPostStmt->fetch() ?: null;
+    $taskPost = null;
+    if ($latestTaskId) {
+        $getLatestTaskPostStmt->execute([':taskId' => $latestTaskId]);
+        $taskPost = $getLatestTaskPostStmt->fetch() ?: null;
+    }
 
-        $taskPost = null;
+    $latestPostContent = null;
 
-        if ($taskId) {
-            $latestTaskPostStmt->execute([':taskId' => $taskId]);
-            $taskPost = $latestTaskPostStmt->fetch() ?: null;
-        }
+    if ($accountPost && $taskPost) {
+        $accountTime = strtotime((string) $accountPost['updated_at']);
+        $taskTime = strtotime((string) $taskPost['updated_at']);
+        $latestPostContent = $accountTime >= $taskTime ? $accountPost['post'] : $taskPost['post'];
+    } elseif ($accountPost) {
+        $latestPostContent = $accountPost['post'];
+    } elseif ($taskPost) {
+        $latestPostContent = $taskPost['post'];
+    }
 
-        $latestPost = null;
+    if ($latestPostContent !== null) {
+        $updateAccountStmt->execute([
+            ':value' => $latestPostContent,
+            ':id' => $accountId,
+        ]);
 
-        if ($accountPost && $taskPost) {
-            $latestPost = strtotime((string) $accountPost['updated_at']) >= strtotime((string) $taskPost['updated_at'])
-                ? $accountPost
-                : $taskPost;
-        } else {
-            $latestPost = $accountPost ?: $taskPost;
-        }
-
-        if ($latestPost && array_key_exists('post', $latestPost)) {
-            $updateAccountStmt->execute([
-                ':lastUpdate' => $latestPost['post'],
-                ':accountId' => $accountId,
-            ]);
-            $updatedAccounts += $updateAccountStmt->rowCount() > 0 ? 1 : 0;
-        }
-
-        if ($taskId && $taskPost && array_key_exists('post', $taskPost)) {
-            $updateTaskStmt->execute([
-                ':lastUpdate' => $taskPost['post'],
-                ':taskId' => $taskId,
-            ]);
-            $updatedTasks += $updateTaskStmt->rowCount() > 0 ? 1 : 0;
+        if ($updateAccountStmt->rowCount() > 0) {
+            $updatedAccountCount++;
         }
     }
 
-    $pdo->commit();
-} catch (Throwable $e) {
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
+    if ($latestTaskId && $taskPost && $taskPost['post'] !== null) {
+        $updateTaskStmt->execute([
+            ':value' => $taskPost['post'],
+            ':id' => $latestTaskId,
+        ]);
 
-    fwrite(STDERR, 'Failed to update latest dynamic: ' . $e->getMessage() . "\n");
-    exit(1);
+        if ($updateTaskStmt->rowCount() > 0) {
+            $updatedTaskCount++;
+        }
+    }
 }
 
 printf(
-    "Done. scanned_accounts=%d updated_accounts=%d updated_tasks=%d\n",
-    $totalAccounts,
-    $updatedAccounts,
-    $updatedTasks
+    "Done. scanned=%d updated_accounts=%d updated_tasks=%d\n",
+    $scanned,
+    $updatedAccountCount,
+    $updatedTaskCount
 );
