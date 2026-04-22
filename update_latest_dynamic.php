@@ -19,6 +19,11 @@ $taskLastUpdateField = 'last_update';
 $forceUpdateAll = false;
 // 仅当记录最后修改时间在这个分钟数以内时才更新（force=true 时忽略）。
 $updateWithinMinutes = 5;
+// 用于和数据库时间保持一致的时区（默认香港）。
+$appTimeZone = 'Asia/Hong_Kong';
+
+date_default_timezone_set($appTimeZone);
+$timeZone = new DateTimeZone($appTimeZone);
 
 if (!preg_match('/^[a-zA-Z0-9_]+$/', $accountLastUpdateField) || !preg_match('/^[a-zA-Z0-9_]+$/', $taskLastUpdateField)) {
     fwrite(STDERR, "Invalid field name.\n");
@@ -90,7 +95,23 @@ $scanned = 0;
 $updatedAccountCount = 0;
 $updatedTaskCount = 0;
 $skippedByTimeCount = 0;
-$freshThreshold = time() - ($updateWithinMinutes * 60);
+$freshThreshold = (new DateTimeImmutable('now', $timeZone))->getTimestamp() - ($updateWithinMinutes * 60);
+
+$parseDbTimeToTimestamp = static function (?string $time, DateTimeZone $timeZone): ?int {
+    if (!$time) {
+        return null;
+    }
+
+    $dt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $time, $timeZone);
+
+    if ($dt instanceof DateTimeImmutable) {
+        return $dt->getTimestamp();
+    }
+
+    $timestamp = strtotime($time);
+
+    return $timestamp === false ? null : $timestamp;
+};
 
 foreach ($accountIds as $accountId) {
     $scanned++;
@@ -113,9 +134,13 @@ foreach ($accountIds as $accountId) {
     $latestPostTime = null;
 
     if ($accountPost && $taskPost) {
-        $accountTime = strtotime((string) $accountPost['updated_at']);
-        $taskTime = strtotime((string) $taskPost['updated_at']);
-        if ($accountTime >= $taskTime) {
+        $accountTime = $parseDbTimeToTimestamp((string) $accountPost['updated_at'], $timeZone);
+        $taskTime = $parseDbTimeToTimestamp((string) $taskPost['updated_at'], $timeZone);
+
+        if ($accountTime === null && $taskTime === null) {
+            $latestPostContent = null;
+            $latestPostTime = null;
+        } elseif ($taskTime === null || ($accountTime !== null && $accountTime >= $taskTime)) {
             $latestPostContent = $accountPost['post'];
             $latestPostTime = $accountTime;
         } else {
@@ -124,10 +149,10 @@ foreach ($accountIds as $accountId) {
         }
     } elseif ($accountPost) {
         $latestPostContent = $accountPost['post'];
-        $latestPostTime = strtotime((string) $accountPost['updated_at']);
+        $latestPostTime = $parseDbTimeToTimestamp((string) $accountPost['updated_at'], $timeZone);
     } elseif ($taskPost) {
         $latestPostContent = sprintf('[%s]%s', $latestTaskName, (string) $taskPost['post']);
-        $latestPostTime = strtotime((string) $taskPost['updated_at']);
+        $latestPostTime = $parseDbTimeToTimestamp((string) $taskPost['updated_at'], $timeZone);
     }
 
     if (
@@ -146,7 +171,7 @@ foreach ($accountIds as $accountId) {
         $skippedByTimeCount++;
     }
 
-    $taskPostTime = $taskPost ? strtotime((string) $taskPost['updated_at']) : null;
+    $taskPostTime = $taskPost ? $parseDbTimeToTimestamp((string) $taskPost['updated_at'], $timeZone) : null;
 
     if (
         $latestTaskId &&
