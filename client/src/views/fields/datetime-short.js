@@ -82,6 +82,11 @@ class DatetimeShortFieldView extends DatetimeFieldView {
         }
 
         const m = this.getDateTime().toMoment(value);
+
+        if (this.mode === this.MODE_LIST && this.name === 'streamUpdatedAt') {
+            return m.fromNow();
+        }
+
         const now = moment().tz(this.getDateTime().timeZone || 'UTC');
         const dt = now.clone().startOf('day');
 
