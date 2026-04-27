@@ -55,6 +55,16 @@ export interface Options {
     labelText?: string;
     mode?: 'detail' | 'edit' | 'list' | 'search';
     recordHelper?: import('view-record-helper').default;
+    disabledLocked?: boolean;
+    disabled?: boolean;
+    readOnlyLocked?: boolean;
+    readOnlyDisabled?: boolean;
+    tooltipText?: string;
+    tooltip?: string;
+    defs?: Record<string, any>;
+    validateCallback?: () => boolean;
+    dataObject?: Record<string, any>;
+    searchParams?: Record<string, any>;
 }
 
 /**
@@ -69,7 +79,7 @@ export interface Params {
 }
 
 export interface ViewSchema {
-    model?: Model;
+    model: Model;
 }
 
 type Mode = 'list' | 'listLink' | 'detail' | 'edit' | 'search';
@@ -82,22 +92,28 @@ type Mode = 'list' | 'listLink' | 'detail' | 'edit' | 'search';
 export default class BaseFieldView<
     S extends ViewSchema = ViewSchema,
     P extends Params = Params,
+    O extends Options = Options,
 > extends View<{model: S['model']}> {
+
+    options: O & {params: P}
 
     /**
      * @param options Options.
      */
-    constructor(options: {[s: string]: any} & Options & P) {
+    constructor(options: {[s: string]: unknown} & O & {params: P}) {
         super(options);
 
         this.name = options.name;
-        this.labelText = options.labelText;
+
+        if (options.labelText != null) {
+            this.labelText = options.labelText;
+        }
     }
 
     /**
      * A field type.
      */
-    type: string = 'base'
+    readonly type: string = 'base'
 
     /**
      * List mode template.
@@ -149,7 +165,7 @@ export default class BaseFieldView<
      *
      * Functions are supported as of v8.3.
      */
-    validations: Array<(() => boolean) | string> = ['required']
+    protected validations: Array<(() => boolean) | string> = ['required']
 
     /**
      * List mode.
@@ -191,27 +207,27 @@ export default class BaseFieldView<
     /**
      * Definitions.
      */
-    protected defs: Record<string, any> = null
+    protected defs: Record<string, any>
 
     /**
      * Field parameters.
      */
-    params: {required: boolean} & P & Record<string, unknown>
+    params: {required?: boolean} & Partial<P> & Record<string, any>
 
     /**
      * A mode.
      */
-    mode: Mode = 'detail'
+    mode: Mode | undefined = 'detail'
 
     /**
      * Search params.
      */
-    searchParams: {[s: string]: any} | null = null
+    protected searchParams: {[s: string]: any} | null = null
 
     /**
      * Inline edit disabled.
      */
-    inlineEditDisabled: boolean = false
+    private inlineEditDisabled: boolean = false
 
     /**
      * Field is disabled.
@@ -225,7 +241,6 @@ export default class BaseFieldView<
 
     /**
      * Read-only locked.
-     *
      */
     readOnlyLocked: boolean = false
 
@@ -241,6 +256,8 @@ export default class BaseFieldView<
 
     /**
      * Attribute values before edit.
+     *
+     * @internal
      */
     initialAttributes: {[s: string]: any} | null = null
 
@@ -252,7 +269,7 @@ export default class BaseFieldView<
     /**
      * @internal
      */
-    private validateCallback: () => boolean
+    private validateCallback: (() => boolean) | undefined
 
     /**
      * An element selector to point validation popovers to.
@@ -262,7 +279,7 @@ export default class BaseFieldView<
     /**
      * A view-record helper.
      */
-    recordHelper: import('view-record-helper').default | null = null
+    protected recordHelper: import('view-record-helper').default | null = null
 
     /**
      * @internal
@@ -283,6 +300,8 @@ export default class BaseFieldView<
     /**
      * Is searchable once a search filter is added (no need to type or selecting anything).
      * Actual for search mode.
+     *
+     * @internal
      */
     initialSearchIsNotIdle: boolean = false
 
@@ -292,7 +311,9 @@ export default class BaseFieldView<
     protected entityType: string | null = null
 
     /**
-     * A last validation message;
+     * A last validation message.
+     *
+     * @internal
      */
     lastValidationMessage: string | null = null
 
@@ -462,17 +483,19 @@ export default class BaseFieldView<
 
     /**
      * Get a label element. Available only after the view is rendered.
+     *
+     * @internal
      */
-    getLabelElement(): JQuery {
-        if (this.$label && this.$label.get(0) && !document.contains(this.$label.get(0))) {
-            this.$label = undefined;
+    getLabelElement(): JQuery | null {
+        if (this.$label && this.$label.get(0) && !document.contains(this.$label.get(0) as HTMLElement)) {
+            this.$label = null;
         }
 
         if (!this.$label || !this.$label.length) {
             this.$label = this.$el.parent().children('label');
         }
 
-        return this.$label;
+        return this.$label ?? null;
     }
 
     /**
@@ -592,19 +615,21 @@ export default class BaseFieldView<
 
         const property = mode + 'Template';
 
+        const self = this as any;
+
         if (!(property in this)) {
-            this[property] = 'fields/' + Espo.Utils.camelCaseToHyphen(this.type) + '/' + this.mode;
+            self[property] = 'fields/' + Espo.Utils.camelCaseToHyphen(this.type) + '/' + this.mode;
         }
 
         if (!this._hasTemplateContent) {
-            this.setTemplate(this[property]);
+            this.setTemplate(self[property]);
         }
 
         const contentProperty = mode + 'TemplateContent';
 
         if (!this._hasTemplateContent) {
-            if (contentProperty in this && this[contentProperty] != null) {
-                this.setTemplateContent(this[contentProperty]);
+            if (contentProperty in self && self[contentProperty] != null) {
+                this.setTemplateContent(self[contentProperty] as string);
             }
         }
 
@@ -670,8 +695,10 @@ export default class BaseFieldView<
 
     private _initCalled: boolean = false
 
-    /** @inheritDoc */
-    init() {
+    /**
+     * @internal
+     */
+    protected init() {
         this.validations = Espo.Utils.clone(this.validations);
         this.searchTypeList = Espo.Utils.clone(this.searchTypeList);
 
@@ -679,7 +706,7 @@ export default class BaseFieldView<
 
         this.defs = this.options.defs || {};
         this.name = this.options.name || this.defs.name;
-        this.params = this.options.params || this.defs.params || {};
+        this.params = this.options.params ?? this.defs.params ?? {};
         this.validateCallback = this.options.validateCallback;
 
         this.fieldType = this.model.getFieldParam(this.name, 'type') || this.type;
@@ -689,7 +716,7 @@ export default class BaseFieldView<
         this.dataObject = Espo.Utils.clone(this.options.dataObject || {});
 
         if (!this.labelText) {
-            this.labelText = this.translate(this.name, 'fields', this.entityType);
+            this.labelText = this.translate(this.name, 'fields', this.entityType ?? undefined);
         }
 
         const paramList = this.paramList || this.getFieldManager().getParamList(this.type).map(it => it.name);
@@ -948,9 +975,9 @@ export default class BaseFieldView<
 
             const $label = this.getLabelElement();
 
-            $label.append(' ');
+            $label?.append(' ');
 
-            this.getLabelElement().append($a);
+            this.getLabelElement()?.append($a);
 
             let tooltipText = this.options.tooltipText || this.tooltipText;
 
@@ -959,10 +986,10 @@ export default class BaseFieldView<
                     this.tooltip.split('.') :
                     [this.entityType, this.tooltip];
 
-                tooltipText = this.translate(field, 'tooltips', scope);
+                tooltipText = this.translate(field, 'tooltips', scope ?? undefined);
             }
 
-            tooltipText = tooltipText || this.translate(this.name, 'tooltips', this.entityType) || '';
+            tooltipText = tooltipText || this.translate(this.name, 'tooltips', this.entityType ?? undefined) || '';
             tooltipText = this.getHelper()
                 .transformMarkdownText(tooltipText, {linksInNewTab: true}).toString();
 
@@ -981,6 +1008,11 @@ export default class BaseFieldView<
      */
     showRequiredSign() {
         const $label = this.getLabelElement();
+
+        if (!$label) {
+            return;
+        }
+
         let $sign = $label.find('span.required-sign');
 
         if ($label.length && !$sign.length) {
@@ -1000,16 +1032,16 @@ export default class BaseFieldView<
      */
     hideRequiredSign() {
         const $label = this.getLabelElement();
-        const $sign = $label.find('span.required-sign');
+        const $sign = $label?.find('span.required-sign');
 
-        $sign.hide();
+        $sign?.hide();
     }
 
     /**
      * Get search-params data.
      */
     protected getSearchParamsData(): Record<string, any> {
-        return this.searchParams.data || {};
+        return this.searchParams?.data || {};
     }
 
     /**
@@ -1023,7 +1055,7 @@ export default class BaseFieldView<
      * Get a current search type.
      */
     protected getSearchType(): string {
-        return this.getSearchParamsData().type || this.searchParams.type;
+        return this.getSearchParamsData().type || this.searchParams?.type;
     }
 
     /**
@@ -1201,7 +1233,7 @@ export default class BaseFieldView<
         let data = this.fetch();
 
         const model = this.model;
-        const prev = this.initialAttributes;
+        const prev = this.initialAttributes ?? {};
 
         model.setMultiple(data, {silent: true});
         data = model.attributes;
@@ -1213,7 +1245,9 @@ export default class BaseFieldView<
                 continue;
             }
 
-            (attrs || (attrs = {}))[attr] = data[attr];
+            const itemAttrs = (attrs || (attrs = {})) as Record<string, any>;
+
+            itemAttrs[attr] = data[attr];
         }
 
         if (!attrs) {
@@ -1223,7 +1257,6 @@ export default class BaseFieldView<
         const isInvalid = this.validateCallback ? this.validateCallback() : this.validate();
 
         if (isInvalid) {
-            // @ts-ignore
             Espo.Ui.error(this.translate('Not valid'));
 
             // @todo Revise.
@@ -1232,7 +1265,6 @@ export default class BaseFieldView<
             return;
         }
 
-        // @ts-ignore
         Espo.Ui.notify(this.translate('saving', 'messages'));
 
         model
@@ -1243,11 +1275,9 @@ export default class BaseFieldView<
 
                 model.trigger('after:save');
 
-                // @ts-ignore
                 Espo.Ui.success(this.translate('Saved'));
             })
             .catch(() => {
-                // @ts-ignore
                 Espo.Ui.error(this.translate('Error occurred'));
 
                 // @todo Revise.
@@ -1329,7 +1359,7 @@ export default class BaseFieldView<
         }
 
         if (!noReset) {
-            this.model.setMultiple(this.initialAttributes, {
+            this.model.setMultiple(this.initialAttributes ?? {}, {
                 skipReRenderInEditMode: true,
                 action: 'cancel-edit',
             });
@@ -1351,7 +1381,7 @@ export default class BaseFieldView<
         if (this.recordHelper && this.recordHelper.isChanged()) {
             await this.confirm({
                 message: this.translate('changesLossConfirmation', 'messages'),
-                cancelCallback: () => this.recordHelper.trigger('continue-inline-edit'),
+                cancelCallback: () => this.recordHelper?.trigger('continue-inline-edit'),
             });
         }
 
@@ -1542,7 +1572,13 @@ export default class BaseFieldView<
             } else {
                 const method = 'validate' + Espo.Utils.upperCaseFirst(item);
 
-                notValid = this[method].call(this);
+                const fn = (this as any)[method];
+
+                if (typeof fn === 'function') {
+                    notValid = fn.call(this);
+                } else {
+                    throw new Error(`No '${method}' method.`)
+                }
             }
 
             if (notValid) {
@@ -1598,13 +1634,13 @@ export default class BaseFieldView<
      * Fetch field values from DOM.
      */
     fetch(): Record<string, any> {
-        if (!this.$element.length) {
+        if (!this.$element?.length) {
             return {};
         }
 
-        const data = {};
+        const data = {} as Record<string, any>;
 
-        data[this.name] = (this.$element.val() as string).trim();
+        data[this.name] = (this.$element?.val() as string).trim();
 
         return data;
     }
@@ -1613,7 +1649,7 @@ export default class BaseFieldView<
      * Fetch search data from DOM.
      */
     fetchSearch(): Record<string, any> | null {
-        const value = this.$element.val().toString().trim();
+        const value = this.$element?.val()?.toString()?.trim();
 
         if (value) {
             return {

@@ -111,6 +111,10 @@ class PipelinesUpdateHook implements UpdateHook
                         'inlineEditDisabled',
                     ],
                     'view' => 'views/fields/extra/pipeline-stage',
+                    'dynamicLogicConditionTypeList' => [
+                        'isEmpty',
+                        'isNotEmpty',
+                    ]
                 ],
             ],
             'links' => [
@@ -130,6 +134,14 @@ class PipelinesUpdateHook implements UpdateHook
                 Field::PIPELINE => PipelineLinkChecker::class,
                 Field::PIPELINE_STAGE => PipelineStageLinkChecker::class,
             ],
+        ]);
+
+        $this->metadata->set('selectDefs', $entityType, [
+            'selectAttributesDependencyMap' => [
+                Field::PIPELINE_STAGE . 'Id' => [
+                    Field::PIPELINE . 'Id',
+                ]
+            ]
         ]);
 
         $this->metadata->save();
@@ -171,6 +183,10 @@ class PipelinesUpdateHook implements UpdateHook
         $this->metadata->delete('aclDefs', $entityType, [
             'linkCheckerClassNameMap.' . Field::PIPELINE,
             'linkCheckerClassNameMap.' . Field::PIPELINE_STAGE,
+        ]);
+
+        $this->metadata->delete('selectDefs', $entityType, [
+            'selectAttributesDependencyMap.' . Field::PIPELINE_STAGE . 'Id',
         ]);
 
         $this->metadata->save();

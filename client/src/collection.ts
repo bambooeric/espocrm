@@ -97,7 +97,7 @@ export interface Options {
     model?: typeof Model;
     defs: import('model').Defs;
     maxSize?: number;
-    entityType?: string;
+    entityType?: string | null;
     urlRoot?: string;
     url?: string;
     orderBy: string | null;
@@ -174,7 +174,7 @@ export default class Collection<TModel extends Model = Model> {
     /**
      * A where function.
      */
-    whereFunction: () => WhereItem[] | null = null
+    whereFunction: (() => WhereItem[]) | null = null
 
     /**
      * A last sync request promise.
@@ -219,7 +219,7 @@ export default class Collection<TModel extends Model = Model> {
     private _byId: Record<string, TModel>
 
 
-    private readonly _onModelEventBind: () => void;
+    private readonly _onModelEventBind: any;
 
     /**
      * @param {Model[]|Record<string, *>[]|null} [models] Models.
@@ -374,25 +374,22 @@ export default class Collection<TModel extends Model = Model> {
 
         models = Array.isArray(models) ? models.slice() : [models];
 
+        // Should not undefined if not set.
         let at = options.at;
 
-        if (at != null) {
-            at = +at;
-        }
-
-        if (at > this.length) {
+        if (at != null && at > this.length) {
             at = this.length;
         }
 
-        if (at < 0) {
+        if (at != null && at < 0) {
             at += this.length + 1;
         }
 
-        const set = [];
+        const set = [] as unknown[];
         const toAdd = [];
         const toMerge = [];
         const toRemove = [];
-        const modelMap = {};
+        const modelMap = {} as Record<string, any>;
 
         const add = options.add;
         const merge = options.merge;
@@ -401,6 +398,7 @@ export default class Collection<TModel extends Model = Model> {
         let model: TModel | Record<string, any>;
 
         for (let i = 0; i < models.length; i++) {
+            // @ts-ignore
             model = models[i];
 
             const existing = this._get(model);
@@ -423,8 +421,10 @@ export default class Collection<TModel extends Model = Model> {
                     set.push(existing);
                 }
 
+                // @ts-ignore
                 models[i] = existing;
             } else if (add) {
+                // @ts-ignore
                 model = models[i] = this._prepareModel(model);
 
                 if (model && model instanceof Model) {
@@ -460,6 +460,7 @@ export default class Collection<TModel extends Model = Model> {
             orderChanged =
                 this.length !== set.length ||
                 _.some(this.models, (m, index) => {
+                    // @ts-ignore
                     return m !== set[index];
                 });
 
@@ -923,7 +924,7 @@ export default class Collection<TModel extends Model = Model> {
      * @return {boolean}
      */
     isBeingFetched(): boolean {
-        return this.lastSyncPromise && this.lastSyncPromise.getReadyState() < 4;
+        return Boolean(this.lastSyncPromise && this.lastSyncPromise?.getReadyState() < 4);
     }
 
     /**
@@ -931,7 +932,7 @@ export default class Collection<TModel extends Model = Model> {
      */
     abortLastFetch() {
         if (this.isBeingFetched()) {
-            this.lastSyncPromise.abort();
+            this.lastSyncPromise?.abort();
         }
     }
 
@@ -1042,8 +1043,10 @@ export default class Collection<TModel extends Model = Model> {
     // noinspection JSUnusedGlobalSymbols
     /**
      * Compose a URL for syncing. Called from Model.sync.
+     *
+     * @internal
      */
-    protected composeSyncUrl(): string {
+    protected composeSyncUrl(): string | null {
         return this.url;
     }
 
@@ -1163,6 +1166,7 @@ export default class Collection<TModel extends Model = Model> {
         }
 
         if (!model) {
+            // @ts-ignore
             this.trigger.apply(this, arguments);
 
             return;
@@ -1191,6 +1195,7 @@ export default class Collection<TModel extends Model = Model> {
             }
         }
 
+        // @ts-ignore
         this.trigger.apply(this, arguments);
     }
 
@@ -1210,8 +1215,8 @@ export default class Collection<TModel extends Model = Model> {
         return new ModelClass(attributes, {
             collection: this,
             // @ts-ignore
-            entityType: this.entityType || this.name,
-            defs: this.defs,
+            entityType: this.entityType ?? this.name ?? undefined,
+            defs: this.defs ?? undefined,
         });
     }
 
@@ -1222,6 +1227,7 @@ export default class Collection<TModel extends Model = Model> {
      * @param {function(...any)} callback A callback.
      */
     on(name: string, callback: (...args: unknown[]) => any): this {
+        // The context argument is needed.
         Events.on.call(this, name, callback, arguments[2]);
 
         return this;
@@ -1234,6 +1240,7 @@ export default class Collection<TModel extends Model = Model> {
      * @param {function(...any)} callback A callback.
      */
     once(name: string, callback: (...args: unknown[]) => void): this {
+        // The context argument is needed.
         Events.once.call(this, name, callback, arguments[2]);
 
         return this;
@@ -1246,7 +1253,8 @@ export default class Collection<TModel extends Model = Model> {
      * @param {function()} [callback] From a specific callback.
      */
     off(name?: string, callback?: (...args: unknown[]) => void): this {
-        Events.off.call(this, name, callback);
+        // The context argument is needed.
+        Events.off.call(this, name, callback, arguments[2]);
 
         return this;
     }
