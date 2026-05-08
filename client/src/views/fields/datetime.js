@@ -162,41 +162,26 @@ class DatetimeFieldView extends DateFieldView {
                 return this.getDateTime().toDisplay(value);
             }
 
-            let timeFormat = this.getDateTime().timeFormat;
-
-            if (this.params.hasSeconds) {
-                timeFormat = timeFormat.replace(/:mm/, ':mm:ss');
-            }
-
             const d = this.getDateTime().toMoment(value);
             const now = moment().tz(this.getDateTime().timeZone || 'UTC');
-            const dt = now.clone().startOf('day');
+            const diffSeconds = now.diff(d, 'seconds');
+            const diffMinutes = now.diff(d, 'minutes');
+            const diffHours = now.diff(d, 'hours');
+            const diffDays = now.diff(d, 'days');
 
-            const ranges = {
-                'today': [dt.unix(), dt.add(1, 'days').unix()],
-                'tomorrow': [dt.unix(), dt.add(1, 'days').unix()],
-                'yesterday': [dt.add(-3, 'days').unix(), dt.add(1, 'days').unix()]
-            };
-
-            if (d.unix() >= ranges['today'][0] && d.unix() < ranges['today'][1]) {
-                return this.translate('Today') + ' ' + d.format(timeFormat);
+            if (diffMinutes < 1) {
+                return this.translate('Just now');
             }
 
-            if (d.unix() > ranges['tomorrow'][0] && d.unix() < ranges['tomorrow'][1]) {
-                return this.translate('Tomorrow') + ' ' + d.format(timeFormat);
+            if (diffMinutes < 60) {
+                return diffMinutes + ' ' + this.translate('minutes ago');
             }
 
-            if (d.unix() > ranges['yesterday'][0] && d.unix() < ranges['yesterday'][1]) {
-                return this.translate('Yesterday') + ' ' + d.format(timeFormat);
+            if (diffHours < 24) {
+                return diffHours + ' ' + this.translate('hours ago');
             }
 
-            const readableFormat = this.getDateTime().getReadableDateFormat();
-
-            if (d.format('YYYY') === now.format('YYYY')) {
-                return d.format(readableFormat) + ' ' + d.format(timeFormat);
-            }
-
-            return d.format(readableFormat + ', YYYY') + ' ' + d.format(timeFormat);
+            return diffDays + ' ' + this.translate('days ago');
         }
 
         return this.getDateTime().toDisplay(value);
