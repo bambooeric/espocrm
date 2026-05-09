@@ -1,23 +1,3 @@
-// 原来的逻辑（第1128-1144行）
-this.listenTo(view, 'change', () => {
-    let toShowApply = this.isSearchedWithAdvancedFilter;
-    if (!toShowApply) {
-        const data = view.getFieldView().fetchSearch();
-        if (data) {
-            toShowApply = true;
-        }
-    }
-    if (!toShowApply) {
-        return;
-    }
-    this.showApplyFiltersButton();
-});
-
-// 新的逻辑
-this.listenTo(view, 'change', () => {
-    this.search();
-    this.hideApplyFiltersButton();
-});
 /************************************************************************
  * This file is part of EspoCRM.
  *
